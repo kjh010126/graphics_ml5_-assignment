@@ -1,0 +1,136 @@
+#include <windows.h>
+#include <gl/gl.h>
+#include <gl/glu.h>
+#include <cmath>
+
+const int numc = 50; // Number of circles
+const int numt = 50; // Number of points per circle
+
+void DrawTorus() {
+    // Adjust the torus size here
+    double r1 = 0.4; // Inner radius of the torus
+    double r2 = 0.2; // Outer radius of the torus
+
+    // Draw the torus
+    for (int i = 0; i < numc; ++i) {
+        glBegin(GL_QUAD_STRIP);
+        for (int j = 0; j <= numt; ++j) {
+            for (int k = 0; k < 2; ++k) {
+                double s = (i + k) % numc + 0.5;
+                double t = j % numt;
+                double x = (r1 + r2 * cos(s * 2 * M_PI / numc)) * cos(t * 2 * M_PI / numt);
+                double y = (r1 + r2 * cos(s * 2 * M_PI / numc)) * sin(t * 2 * M_PI / numt);
+                double z = r2 * sin(s * 2 * M_PI / numc);
+                glVertex3d(x, y, z);
+            }
+        }
+        glEnd();
+    }
+}
+
+void EnableOpenGL(HWND hWnd, HDC* hDC, HGLRC* hRC) {
+    PIXELFORMATDESCRIPTOR pfd;
+    int iFormat;
+
+    *hDC = GetDC(hWnd);
+    ZeroMemory(&pfd, sizeof(pfd));
+    pfd.nSize = sizeof(pfd);
+    pfd.nVersion = 1;
+    pfd.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER;
+    pfd.iPixelType = PFD_TYPE_RGBA;
+    pfd.cColorBits = 24;
+    pfd.cDepthBits = 16;
+    pfd.iLayerType = PFD_MAIN_PLANE;
+    iFormat = ChoosePixelFormat(*hDC, &pfd);
+    SetPixelFormat(*hDC, iFormat, &pfd);
+
+    *hRC = wglCreateContext(*hDC);
+    wglMakeCurrent(*hDC, *hRC);
+}
+
+void DisableOpenGL(HWND hWnd, HDC hDC, HGLRC hRC) {
+    wglMakeCurrent(NULL, NULL);
+    wglDeleteContext(hRC);
+    ReleaseDC(hWnd, hDC);
+}
+
+LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
+    switch (message) {
+    case WM_CREATE:
+        return 0;
+    case WM_CLOSE:
+        PostQuitMessage(0);
+        return 0;
+    case WM_DESTROY:
+        return 0;
+    case WM_KEYDOWN:
+        switch (wParam) {
+        case VK_ESCAPE:
+            PostQuitMessage(0);
+            return 0;
+        }
+        return 0;
+    default:
+        return DefWindowProc(hWnd, message, wParam, lParam);
+    }
+}
+
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int iCmdShow) {
+    WNDCLASS wc;
+    HWND hWnd;
+    HDC hDC;
+    HGLRC hRC;
+    MSG msg;
+    BOOL bQuit = FALSE;
+    float theta = 0.0f;
+
+    wc.style = CS_OWNDC;
+    wc.lpfnWndProc = WndProc;
+    wc.cbClsExtra = 0;
+    wc.cbWndExtra = 0;
+    wc.hInstance = hInstance;
+    wc.hIcon = LoadIcon(NULL, IDI_APPLICATION);
+    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
+    wc.lpszMenuName = NULL;
+    wc.lpszClassName = "GLSample";
+    RegisterClass(&wc);
+
+    hWnd = CreateWindow("GLSample", "OpenGL Sample", WS_CAPTION | WS_POPUPWINDOW | WS_VISIBLE,
+        0, 0, 512, 512, NULL, NULL, hInstance, NULL);
+
+    EnableOpenGL(hWnd, &hDC, &hRC);
+
+    while (!bQuit) {
+        if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+            if (msg.message == WM_QUIT) {
+                bQuit = TRUE;
+            }
+            else {
+                TranslateMessage(&msg);
+                DispatchMessage(&msg);
+            }
+        }
+        else {
+            glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+            glPushMatrix();
+            glRotatef(theta, 0.0f, 1.0f, 0.0f);
+
+            glColor3f(0.0f, 0.75f, 1.0f); // Sky blue color
+            DrawTorus();
+
+            glPopMatrix();
+
+            SwapBuffers(hDC);
+
+            theta += 1.0f;
+            Sleep(1);
+        }
+    }
+
+    DisableOpenGL(hWnd, hDC, hRC);
+    DestroyWindow(hWnd);
+    return msg.wParam;
+}

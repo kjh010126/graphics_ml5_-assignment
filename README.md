@@ -49,4 +49,6 @@
 어떤 차이가 있는지는 잘 모르겠습니다 그래도 OpenGL과 DirectX 이 두가지는 그래픽스를 배운다면 알아야 하는 그래픽 라이브러리인 것 같습니다.
 
 # Dev-CPP 사각형 큐브 대신 다른 도형 넣기, MFC에서 사각형, 타원, 글씨에 다른 3가지 추가하기 소감
+![캡처3](https://github.com/kjh010126/graphics_ml5_-assignment/assets/74094028/40967f13-da65-4c71-aa29-54098c51aaa9)
+
 

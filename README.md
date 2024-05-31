@@ -63,4 +63,4 @@ MFC를 단일문서기반(SDI) 선택, MFC 표준으로 하고 만든 다음 클
 반쪽짜리 과제를 수행했습니다.
 
 # SDL에서 블록 깨기 게임을 변형하는 팀 프로젝트 소감
-
+![캡처4](https://github.com/kjh010126/graphics_ml5_-assignment/assets/74094028/5db25b0c-ce4d-41c2-80d3-36adabb4605e)

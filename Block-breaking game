@@ -1,0 +1,703 @@
+#include <SDL.h>
+#include <SDL_ttf.h>
+#include <SDL_image.h>
+#include <iostream>
+#include <vector>
+
+// 윈도우 크기 정의
+const int SCREEN_WIDTH = 800;
+const int SCREEN_HEIGHT = 600;
+const int PADDLE_WIDTH = 100;
+const int PADDLE_HEIGHT = 20;
+const int BALL_SIZE = 10;
+const int BLOCK_WIDTH = 60;
+int BLOCK_HEIGHT = 20; // 공 속도 조절
+const int NUM_BLOCKS_X = 11;
+const int NUM_BLOCKS_Y = 4;
+int startstate = 0; // 시작 메뉴 설정
+int levelstate = 1; // 난이도 설정
+int highscore = 0;  // 최고 점수
+
+SDL_Window* window = nullptr;
+SDL_Renderer* renderer = nullptr;
+TTF_Font* font = nullptr;
+
+// 텍스트를 렌더링하는 함수
+void renderText(const std::string& message, int x, int y, SDL_Color color) {
+    SDL_Surface* surface = TTF_RenderUTF8_Blended(font, message.c_str(), color);
+    SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+
+    SDL_Rect dstrect = { x, y, surface->w, surface->h };
+    SDL_RenderCopy(renderer, texture, NULL, &dstrect);
+
+    SDL_FreeSurface(surface);
+    SDL_DestroyTexture(texture);
+}
+
+// 배경 이미지를 렌더링하는 함수
+void renderBackground(const char* filePath) {
+    SDL_Surface* surface = IMG_Load(filePath);
+    if (!surface) {
+        std::cerr << "이미지 로드 실패! IMG_Error: " << IMG_GetError() << std::endl;
+        return;
+    }
+    SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+    SDL_FreeSurface(surface);
+
+    SDL_Rect dstrect = { 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT };
+    SDL_RenderCopy(renderer, texture, NULL, &dstrect);
+
+    SDL_DestroyTexture(texture);
+}
+
+// 패들 클래스 정의
+class Paddle {
+public:
+    SDL_Rect rect; // 패들의 사각형
+    int speed; // 패들의 이동 속도
+
+    // 생성자: 패들의 초기 위치와 크기 설정
+    Paddle(int x, int y) : speed(12) {
+        rect = { x, y, PADDLE_WIDTH, PADDLE_HEIGHT };
+    }
+
+    // 패들을 왼쪽으로 이동
+    void moveLeft() {
+        if (rect.x > 0) {
+            rect.x -= speed;
+        }
+    }
+
+    // 패들을 오른쪽으로 이동
+    void moveRight() {
+        if (rect.x + rect.w < SCREEN_WIDTH) {
+            rect.x += speed;
+        }
+    }
+
+    // 패들을 렌더러에 그리기
+    void render(SDL_Renderer* renderer) const {
+        SDL_SetRenderDrawColor(renderer, 0, 0, 255, 255); // 패들 색상 파란색
+        SDL_RenderFillRect(renderer, &rect);
+    }
+};
+
+// 공 클래스 정의
+class Ball {
+public:
+    SDL_Rect rect; // 공의 사각형
+    int xVel, yVel; // 공의 속도
+
+    // 생성자: 공의 초기 위치와 속도 설정
+    Ball(int x, int y) : xVel(3), yVel(-3) {
+        rect = { x, y, BALL_SIZE, BALL_SIZE };
+    }
+
+    // 공을 이동
+    void move() {
+        rect.x += xVel;
+        rect.y += yVel;
+
+        // 공이 좌우 벽에 부딪히면 속도 반전
+        if (rect.x <= 0 || rect.x + rect.w >= SCREEN_WIDTH) {
+            xVel = -xVel;
+        }
+        // 공이 위쪽 벽에 부딪히면 속도 반전
+        if (rect.y <= 0) {
+            yVel = -yVel;
+        }
+    }
+
+    // 공을 렌더러에 그리기
+    void render(SDL_Renderer* renderer) const {
+        SDL_SetRenderDrawColor(renderer, 255, 255, 0, 255); // 공 색상 노란색
+        SDL_RenderFillRect(renderer, &rect);
+    }
+
+    // 공의 위치와 속도를 초기화
+    void reset(int x, int y) {
+        rect.x = x;
+        rect.y = y;
+        xVel = 3;
+        yVel = -3;
+    }
+};
+
+// 블록 클래스 정의
+class Block {
+public:
+    SDL_Rect rect; // 블록의 사각형
+    bool destroyed; // 블록이 파괴되었는지 여부
+
+    // 생성자: 블록의 초기 위치와 상태 설정
+    Block(int x, int y) : destroyed(false) {
+        rect = { x, y, BLOCK_WIDTH, BLOCK_HEIGHT };
+    }
+
+    // 블록을 렌더러에 그리기
+    void render(SDL_Renderer* renderer) const {
+        if (!destroyed) {
+            SDL_SetRenderDrawColor(renderer, 0, 255, 0, 255); // 블록 색상 초록색
+            SDL_RenderFillRect(renderer, &rect);
+        }
+    }
+};
+
+// 두 사각형이 충돌하는지 확인하는 함수
+bool checkCollision(const SDL_Rect& a, const SDL_Rect& b) {
+    return SDL_HasIntersection(&a, &b);
+}
+
+// 게임 시작 화면 함수
+void gameStart() {
+    Paddle paddle(SCREEN_WIDTH / 2 - PADDLE_WIDTH / 2, SCREEN_HEIGHT - 50);
+    Ball ball(SCREEN_WIDTH / 2 - BALL_SIZE / 2, SCREEN_HEIGHT / 2 - BALL_SIZE / 2);
+
+    std::vector<Block> blocks;
+    for (int i = 0; i < NUM_BLOCKS_X; ++i) {
+        for (int j = 0; j < NUM_BLOCKS_Y; ++j) {
+            blocks.emplace_back(i * (BLOCK_WIDTH + 5) + 50, j * (BLOCK_HEIGHT + 5) + 50);
+        }
+    }
+
+    int lives = 1; // 플레이어의 생명 수
+    int score = 0; // 점수
+    bool quit = false;
+    SDL_Event e;
+
+    while (!quit) {
+
+        while (SDL_PollEvent(&e) != 0) {
+            if (e.type == SDL_QUIT) {
+                quit = true;
+            }
+            else if (e.type == SDL_KEYDOWN) {
+                switch (e.key.keysym.sym) {
+                case SDLK_LEFT:
+                    paddle.moveLeft();
+                    break;
+                case SDLK_RIGHT:
+                    paddle.moveRight();
+                    break;
+                }
+            }
+        }
+
+        ball.move();
+
+        // 공과 패들이 충돌하면 공의 방향을 반전
+        if (checkCollision(ball.rect, paddle.rect)) {
+            ball.yVel = -ball.yVel;
+        }
+
+        // 공과 블록이 충돌하면 블록을 파괴하고 공의 방향을 반전
+        for (auto& block : blocks) {
+            if (!block.destroyed && checkCollision(ball.rect, block.rect)) {
+                block.destroyed = true;
+                ball.yVel = -ball.yVel;
+                score++; // 벽돌이 깨졌을 때 score 증가
+                break;
+            }
+        }
+
+        // 공이 바닥에 닿으면 생명을 잃고 공의 위치를 초기화
+        if (ball.rect.y + ball.rect.h >= SCREEN_HEIGHT) {
+            ball.reset(SCREEN_WIDTH / 2 - BALL_SIZE / 2, SCREEN_HEIGHT / 2 - BALL_SIZE / 2);
+            lives--;
+            if (lives <= 0) {
+                quit = true;
+            }
+        }
+
+        SDL_SetRenderDrawColor(renderer, 128, 0, 128, 255); // 배경색 보라색
+        SDL_RenderClear(renderer);
+
+        paddle.render(renderer);
+        ball.render(renderer);
+
+        for (const auto& block : blocks) {
+            block.render(renderer);
+        }
+
+        SDL_RenderPresent(renderer);
+
+        SDL_Delay(16); // 프레임 제한 (약 60fps)
+    }
+}
+
+// 게임 시작 메뉴 화면을 보여주는 함수
+void showMenu() {
+    bool quit = false;
+    SDL_Event e;
+    int selectedOption = 0; // 선택된 옵션 (0: 게임 시작, 1: 난이도 설정)
+
+    while (!quit) {
+        while (SDL_PollEvent(&e) != 0) {
+            if (e.type == SDL_QUIT) {
+                quit = true;
+                startstate = -1; // 프로그램 종료
+            }
+            else if (e.type == SDL_KEYDOWN) {
+                switch (e.key.keysym.sym) {
+                case SDLK_UP:
+                    selectedOption = (selectedOption - 1 + 2) % 2; // 위 방향키로 선택지 변경
+                    break;
+                case SDLK_DOWN:
+                    selectedOption = (selectedOption + 1) % 2; // 아래 방향키로 선택지 변경
+                    break;
+                case SDLK_RETURN:
+                    if (selectedOption == 0) {
+                        startstate = 1; // 게임 시작
+                        quit = true;
+                    }
+                    else if (selectedOption == 1) {
+                        // 난이도 설정을 여기에 추가할 수 있습니다.
+                        // 예: levelstate를 조절하는 코드
+                    }
+                    break;
+                }
+            }
+        }
+
+        SDL_SetRenderDrawColor(renderer, 128, 0, 128, 255); // 배경색 보라색
+        SDL_RenderClear(renderer);
+
+        // 배경 이미지 렌더링
+        renderBackground("background_image.jpg");
+
+        // 타이틀 텍스트
+        renderText("Block-breaking game", SCREEN_WIDTH / 2 - 100, 100, { 255, 255, 255, 255 });
+
+        // 게임 시작 텍스트
+        SDL_Color startColor = { 255, 255, 255, 255 }; // 기본 색상 흰색
+        if (selectedOption == 0) {
+            startColor = { 255, 0, 0, 255 }; // 선택된 항목 빨간색
+        }
+        renderText("Game start", SCREEN_WIDTH / 2 - 50, 300, startColor);
+
+        // 난이도 설정 텍스트
+        SDL_Color settingsColor = { 255, 255, 255, 255 }; // 기본 색상 흰색
+        if (selectedOption == 1) {
+            settingsColor = { 255, 0, 0, 255 }; // 선택된 항목 빨간색
+        }
+        renderText("Level Settings", SCREEN_WIDTH / 2 - 50, 400, settingsColor);
+
+        SDL_RenderPresent(renderer);
+    }
+}
+
+int main(int argc, char* args[]) {
+    // SDL 초기화
+    if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+        std::cerr << "SDL 초기화 실패! SDL_Error: " << SDL_GetError() << std::endl;
+        return -1;
+    }
+
+    // TTF 초기화
+    if (TTF_Init() == -1) {
+        std::cerr << "TTF 초기화 실패! TTF_Error: " << TTF_GetError() << std::endl;
+        SDL_Quit();
+        return -1;
+    }
+
+    // 폰트 로드
+    font = TTF_OpenFont(u8"Roboto/Roboto-Black.ttf", 24);
+    if (font == NULL) {
+        std::cerr << "폰트 로드 실패! TTF_Error: " << TTF_GetError() << std::endl;
+        TTF_Quit();
+        SDL_Quit();
+        return -1;
+    }
+
+    // 윈도우 생성
+    window = SDL_CreateWindow("SDL 블록 깨기 게임", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_SHOWN);
+    if (window == NULL) {
+        std::cerr << "윈도우 생성 실패! SDL_Error: " << SDL_GetError() << std::endl;
+        TTF_CloseFont(font);
+        TTF_Quit();
+        SDL_Quit();
+        return -1;
+    }
+
+    // 렌더러 생성
+    renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+    if (renderer == NULL) {
+        std::cerr << "렌더러 생성 실패! SDL_Error: " << SDL_GetError() << std::endl;
+        SDL_DestroyWindow(window);
+        TTF_CloseFont(font);
+        TTF_Quit();
+        SDL_Quit();
+        return -1;
+    }
+
+    // 메인 루프: 게임 시작 화면과 게임 화면을 전환
+    while (startstate != -1) {
+        if (startstate == 0) {
+            showMenu();
+        }
+        else if (startstate == 1) {
+            gameStart();
+            startstate = 0; // 게임 종료 후 다시 메뉴로 돌아감
+        }
+    }
+
+    // SDL 정리
+    TTF_CloseFont(font);
+    TTF_Quit();
+    SDL_DestroyRenderer(renderer);
+    SDL_DestroyWindow(window);
+    SDL_Quit();
+
+    return 0;
+}#include <SDL.h>
+#include <SDL_ttf.h>
+#include <SDL_image.h>
+#include <iostream>
+#include <vector>
+
+// 윈도우 크기 정의
+const int SCREEN_WIDTH = 800;
+const int SCREEN_HEIGHT = 600;
+const int PADDLE_WIDTH = 100;
+const int PADDLE_HEIGHT = 20;
+const int BALL_SIZE = 10;
+const int BLOCK_WIDTH = 60;
+int BLOCK_HEIGHT = 20; // 공 속도 조절
+const int NUM_BLOCKS_X = 11;
+const int NUM_BLOCKS_Y = 4;
+int startstate = 0; // 시작 메뉴 설정
+int levelstate = 1; // 난이도 설정
+int highscore = 0;  // 최고 점수
+
+SDL_Window* window = nullptr;
+SDL_Renderer* renderer = nullptr;
+TTF_Font* font = nullptr;
+
+// 텍스트를 렌더링하는 함수
+void renderText(const std::string& message, int x, int y, SDL_Color color) {
+    SDL_Surface* surface = TTF_RenderUTF8_Blended(font, message.c_str(), color);
+    SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+
+    SDL_Rect dstrect = { x, y, surface->w, surface->h };
+    SDL_RenderCopy(renderer, texture, NULL, &dstrect);
+
+    SDL_FreeSurface(surface);
+    SDL_DestroyTexture(texture);
+}
+
+// 배경 이미지를 렌더링하는 함수
+void renderBackground(const char* filePath) {
+    SDL_Surface* surface = IMG_Load(filePath);
+    if (!surface) {
+        std::cerr << "이미지 로드 실패! IMG_Error: " << IMG_GetError() << std::endl;
+        return;
+    }
+    SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+    SDL_FreeSurface(surface);
+
+    SDL_Rect dstrect = { 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT };
+    SDL_RenderCopy(renderer, texture, NULL, &dstrect);
+
+    SDL_DestroyTexture(texture);
+}
+
+// 패들 클래스 정의
+class Paddle {
+public:
+    SDL_Rect rect; // 패들의 사각형
+    int speed; // 패들의 이동 속도
+
+    // 생성자: 패들의 초기 위치와 크기 설정
+    Paddle(int x, int y) : speed(12) {
+        rect = { x, y, PADDLE_WIDTH, PADDLE_HEIGHT };
+    }
+
+    // 패들을 왼쪽으로 이동
+    void moveLeft() {
+        if (rect.x > 0) {
+            rect.x -= speed;
+        }
+    }
+
+    // 패들을 오른쪽으로 이동
+    void moveRight() {
+        if (rect.x + rect.w < SCREEN_WIDTH) {
+            rect.x += speed;
+        }
+    }
+
+    // 패들을 렌더러에 그리기
+    void render(SDL_Renderer* renderer) const {
+        SDL_SetRenderDrawColor(renderer, 0, 0, 255, 255); // 패들 색상 파란색
+        SDL_RenderFillRect(renderer, &rect);
+    }
+};
+
+// 공 클래스 정의
+class Ball {
+public:
+    SDL_Rect rect; // 공의 사각형
+    int xVel, yVel; // 공의 속도
+
+    // 생성자: 공의 초기 위치와 속도 설정
+    Ball(int x, int y) : xVel(3), yVel(-3) {
+        rect = { x, y, BALL_SIZE, BALL_SIZE };
+    }
+
+    // 공을 이동
+    void move() {
+        rect.x += xVel;
+        rect.y += yVel;
+
+        // 공이 좌우 벽에 부딪히면 속도 반전
+        if (rect.x <= 0 || rect.x + rect.w >= SCREEN_WIDTH) {
+            xVel = -xVel;
+        }
+        // 공이 위쪽 벽에 부딪히면 속도 반전
+        if (rect.y <= 0) {
+            yVel = -yVel;
+        }
+    }
+
+    // 공을 렌더러에 그리기
+    void render(SDL_Renderer* renderer) const {
+        SDL_SetRenderDrawColor(renderer, 255, 255, 0, 255); // 공 색상 노란색
+        SDL_RenderFillRect(renderer, &rect);
+    }
+
+    // 공의 위치와 속도를 초기화
+    void reset(int x, int y) {
+        rect.x = x;
+        rect.y = y;
+        xVel = 3;
+        yVel = -3;
+    }
+};
+
+// 블록 클래스 정의
+class Block {
+public:
+    SDL_Rect rect; // 블록의 사각형
+    bool destroyed; // 블록이 파괴되었는지 여부
+
+    // 생성자: 블록의 초기 위치와 상태 설정
+    Block(int x, int y) : destroyed(false) {
+        rect = { x, y, BLOCK_WIDTH, BLOCK_HEIGHT };
+    }
+
+    // 블록을 렌더러에 그리기
+    void render(SDL_Renderer* renderer) const {
+        if (!destroyed) {
+            SDL_SetRenderDrawColor(renderer, 0, 255, 0, 255); // 블록 색상 초록색
+            SDL_RenderFillRect(renderer, &rect);
+        }
+    }
+};
+
+// 두 사각형이 충돌하는지 확인하는 함수
+bool checkCollision(const SDL_Rect& a, const SDL_Rect& b) {
+    return SDL_HasIntersection(&a, &b);
+}
+
+// 게임 시작 화면 함수
+void gameStart() {
+    Paddle paddle(SCREEN_WIDTH / 2 - PADDLE_WIDTH / 2, SCREEN_HEIGHT - 50);
+    Ball ball(SCREEN_WIDTH / 2 - BALL_SIZE / 2, SCREEN_HEIGHT / 2 - BALL_SIZE / 2);
+
+    std::vector<Block> blocks;
+    for (int i = 0; i < NUM_BLOCKS_X; ++i) {
+        for (int j = 0; j < NUM_BLOCKS_Y; ++j) {
+            blocks.emplace_back(i * (BLOCK_WIDTH + 5) + 50, j * (BLOCK_HEIGHT + 5) + 50);
+        }
+    }
+
+    int lives = 1; // 플레이어의 생명 수
+    int score = 0; // 점수
+    bool quit = false;
+    SDL_Event e;
+
+    while (!quit) {
+
+        while (SDL_PollEvent(&e) != 0) {
+            if (e.type == SDL_QUIT) {
+                quit = true;
+            }
+            else if (e.type == SDL_KEYDOWN) {
+                switch (e.key.keysym.sym) {
+                case SDLK_LEFT:
+                    paddle.moveLeft();
+                    break;
+                case SDLK_RIGHT:
+                    paddle.moveRight();
+                    break;
+                }
+            }
+        }
+
+        ball.move();
+
+        // 공과 패들이 충돌하면 공의 방향을 반전
+        if (checkCollision(ball.rect, paddle.rect)) {
+            ball.yVel = -ball.yVel;
+        }
+
+        // 공과 블록이 충돌하면 블록을 파괴하고 공의 방향을 반전
+        for (auto& block : blocks) {
+            if (!block.destroyed && checkCollision(ball.rect, block.rect)) {
+                block.destroyed = true;
+                ball.yVel = -ball.yVel;
+                score++; // 벽돌이 깨졌을 때 score 증가
+                break;
+            }
+        }
+
+        // 공이 바닥에 닿으면 생명을 잃고 공의 위치를 초기화
+        if (ball.rect.y + ball.rect.h >= SCREEN_HEIGHT) {
+            ball.reset(SCREEN_WIDTH / 2 - BALL_SIZE / 2, SCREEN_HEIGHT / 2 - BALL_SIZE / 2);
+            lives--;
+            if (lives <= 0) {
+                quit = true;
+            }
+        }
+
+        SDL_SetRenderDrawColor(renderer, 128, 0, 128, 255); // 배경색 보라색
+        SDL_RenderClear(renderer);
+
+        paddle.render(renderer);
+        ball.render(renderer);
+
+        for (const auto& block : blocks) {
+            block.render(renderer);
+        }
+
+        SDL_RenderPresent(renderer);
+
+        SDL_Delay(16); // 프레임 제한 (약 60fps)
+    }
+}
+
+// 게임 시작 메뉴 화면을 보여주는 함수
+void showMenu() {
+    bool quit = false;
+    SDL_Event e;
+    int selectedOption = 0; // 선택된 옵션 (0: 게임 시작, 1: 난이도 설정)
+
+    while (!quit) {
+        while (SDL_PollEvent(&e) != 0) {
+            if (e.type == SDL_QUIT) {
+                quit = true;
+                startstate = -1; // 프로그램 종료
+            }
+            else if (e.type == SDL_KEYDOWN) {
+                switch (e.key.keysym.sym) {
+                case SDLK_UP:
+                    selectedOption = (selectedOption - 1 + 2) % 2; // 위 방향키로 선택지 변경
+                    break;
+                case SDLK_DOWN:
+                    selectedOption = (selectedOption + 1) % 2; // 아래 방향키로 선택지 변경
+                    break;
+                case SDLK_RETURN:
+                    if (selectedOption == 0) {
+                        startstate = 1; // 게임 시작
+                        quit = true;
+                    }
+                    else if (selectedOption == 1) {
+                        // 난이도 설정을 여기에 추가할 수 있습니다.
+                        // 예: levelstate를 조절하는 코드
+                    }
+                    break;
+                }
+            }
+        }
+
+        SDL_SetRenderDrawColor(renderer, 128, 0, 128, 255); // 배경색 보라색
+        SDL_RenderClear(renderer);
+
+        // 배경 이미지 렌더링
+        renderBackground("background_image.jpg");
+
+        // 타이틀 텍스트
+        renderText("Block-breaking game", SCREEN_WIDTH / 2 - 100, 100, { 255, 255, 255, 255 });
+
+        // 게임 시작 텍스트
+        SDL_Color startColor = { 255, 255, 255, 255 }; // 기본 색상 흰색
+        if (selectedOption == 0) {
+            startColor = { 255, 0, 0, 255 }; // 선택된 항목 빨간색
+        }
+        renderText("Game start", SCREEN_WIDTH / 2 - 50, 300, startColor);
+
+        // 난이도 설정 텍스트
+        SDL_Color settingsColor = { 255, 255, 255, 255 }; // 기본 색상 흰색
+        if (selectedOption == 1) {
+            settingsColor = { 255, 0, 0, 255 }; // 선택된 항목 빨간색
+        }
+        renderText("Level Settings", SCREEN_WIDTH / 2 - 50, 400, settingsColor);
+
+        SDL_RenderPresent(renderer);
+    }
+}
+
+int main(int argc, char* args[]) {
+    // SDL 초기화
+    if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+        std::cerr << "SDL 초기화 실패! SDL_Error: " << SDL_GetError() << std::endl;
+        return -1;
+    }
+
+    // TTF 초기화
+    if (TTF_Init() == -1) {
+        std::cerr << "TTF 초기화 실패! TTF_Error: " << TTF_GetError() << std::endl;
+        SDL_Quit();
+        return -1;
+    }
+
+    // 폰트 로드
+    font = TTF_OpenFont(u8"Roboto/Roboto-Black.ttf", 24);
+    if (font == NULL) {
+        std::cerr << "폰트 로드 실패! TTF_Error: " << TTF_GetError() << std::endl;
+        TTF_Quit();
+        SDL_Quit();
+        return -1;
+    }
+
+    // 윈도우 생성
+    window = SDL_CreateWindow("SDL 블록 깨기 게임", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_SHOWN);
+    if (window == NULL) {
+        std::cerr << "윈도우 생성 실패! SDL_Error: " << SDL_GetError() << std::endl;
+        TTF_CloseFont(font);
+        TTF_Quit();
+        SDL_Quit();
+        return -1;
+    }
+
+    // 렌더러 생성
+    renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+    if (renderer == NULL) {
+        std::cerr << "렌더러 생성 실패! SDL_Error: " << SDL_GetError() << std::endl;
+        SDL_DestroyWindow(window);
+        TTF_CloseFont(font);
+        TTF_Quit();
+        SDL_Quit();
+        return -1;
+    }
+
+    // 메인 루프: 게임 시작 화면과 게임 화면을 전환
+    while (startstate != -1) {
+        if (startstate == 0) {
+            showMenu();
+        }
+        else if (startstate == 1) {
+            gameStart();
+            startstate = 0; // 게임 종료 후 다시 메뉴로 돌아감
+        }
+    }
+
+    // SDL 정리
+    TTF_CloseFont(font);
+    TTF_Quit();
+    SDL_DestroyRenderer(renderer);
+    SDL_DestroyWindow(window);
+    SDL_Quit();
+
+    return 0;
+}

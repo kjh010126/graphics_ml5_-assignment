@@ -66,6 +66,8 @@ MFC를 단일문서기반(SDI) 선택, MFC 표준으로 하고 만든 다음 클
 ![캡처4](https://github.com/kjh010126/graphics_ml5_-assignment/assets/74094028/5db25b0c-ce4d-41c2-80d3-36adabb4605e)
 
 # SFML Tennis 코드를 개선하기 과제
+![11111](https://github.com/kjh010126/graphics_ml5_-assignment/assets/74094028/5f041f10-8a6a-4fca-a86d-6d02e9c6b531)
+
 개선한 내용 : 저는 기존에 있는 테니스 게임에서 플레이어와 AI가 맨끝의 벽에만 붙어서 위아래로만 움직이는게 답답해서 좌우로도 움직일 수 있게 변경을 했습니다.
 좌우로는 움직이는게 가능하긴 하지만 위의 이미지와 같이 화면에 그어진 하얀선을 넘어갈 수 없게 설정을 했습니다.
 
